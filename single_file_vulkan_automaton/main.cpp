@@ -14,6 +14,7 @@ using vkBU = vk::BufferUsageFlagBits;
 using vkIU = vk::ImageUsageFlagBits;
 using vkMP = vk::MemoryPropertyFlagBits;
 using vkDT = vk::DescriptorType;
+using vkSS = vk::ShaderStageFlagBits;
 
 // ----------------------------------------------------------------------------------------------------------
 // Globals
@@ -32,9 +33,7 @@ constexpr bool enableValidationLayers = false;
 // Functuins
 // ----------------------------------------------------------------------------------------------------------
 VKAPI_ATTR VkBool32 VKAPI_CALL
-debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                            VkDebugUtilsMessageTypeFlagsEXT messageTypes,
-                            VkDebugUtilsMessengerCallbackDataEXT const* pCallbackData, void*)
+debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageTypes, VkDebugUtilsMessengerCallbackDataEXT const* pCallbackData, void*)
 {
     std::cerr << "messageIndexName   = " << pCallbackData->pMessageIdName << "\n";
     for (uint8_t i = 0; i < pCallbackData->objectCount; i++) {
@@ -45,8 +44,7 @@ debugUtilsMessengerCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeveri
     return VK_FALSE;
 }
 
-void transitionImageLayout(vk::CommandBuffer cmdBuf, vk::Image image,
-                           vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
+void transitionImageLayout(vk::CommandBuffer cmdBuf, vk::Image image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
 {
     vk::PipelineStageFlags srcStageMask = vk::PipelineStageFlagBits::eAllCommands;
     vk::PipelineStageFlags dstStageMask = vk::PipelineStageFlagBits::eAllCommands;
@@ -86,8 +84,7 @@ void transitionImageLayout(vk::CommandBuffer cmdBuf, vk::Image image,
     cmdBuf.pipelineBarrier(srcStageMask, dstStageMask, {}, {}, {}, barrier);
 }
 
-uint32_t findMemoryType(const vk::PhysicalDevice physicalDevice, const uint32_t typeFilter,
-                        const vk::MemoryPropertyFlags properties)
+uint32_t findMemoryType(const vk::PhysicalDevice physicalDevice, const uint32_t typeFilter, const vk::MemoryPropertyFlags properties)
 {
     vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
     for (uint32_t i = 0; i != memProperties.memoryTypeCount; ++i) {
@@ -120,19 +117,6 @@ vk::PresentModeKHR chooseSwapPresentMode(const std::vector<vk::PresentModeKHR>& 
         }
     }
     return vk::PresentModeKHR::eFifo;
-}
-
-vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities)
-{
-    if (capabilities.currentExtent.width != UINT32_MAX) {
-        return capabilities.currentExtent;
-    }
-    vk::Extent2D actualExtent{ WIDTH, HEIGHT };
-    actualExtent.width = std::clamp(actualExtent.width,
-                                    capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-    actualExtent.height = std::clamp(actualExtent.height,
-                                     capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-    return actualExtent;
 }
 
 std::vector<char> readFile(const std::string& filename)
@@ -454,13 +438,8 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        // Set physical device features
-        vk::PhysicalDeviceFeatures deviceFeatures;
-        vk::DeviceCreateInfo createInfo{ {}, queueCreateInfos, validationLayers, requiredExtensions, &deviceFeatures };
-        vk::StructureChain<vk::DeviceCreateInfo, vk::PhysicalDeviceBufferDeviceAddressFeatures>
-            createInfoChain{ createInfo, {true} };
-
-        device = physicalDevice.createDeviceUnique(createInfoChain.get<vk::DeviceCreateInfo>());
+        vk::DeviceCreateInfo createInfo{ {}, queueCreateInfos, validationLayers, requiredExtensions };
+        device = physicalDevice.createDeviceUnique(createInfo);
         VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 
         computeQueue = device->getQueue(computeFamily, 0);
@@ -500,7 +479,7 @@ private:
         vk::SurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(formats);
         format = surfaceFormat.format;
         presentMode = chooseSwapPresentMode(presentModes);
-        extent = chooseSwapExtent(capabilities);
+        extent = vk::Extent2D{ WIDTH, HEIGHT };
         uint32_t imageCount = capabilities.minImageCount + 1;
 
         // Create swap chain
@@ -516,11 +495,9 @@ private:
         createInfo.setPresentMode(presentMode);
         createInfo.setClipped(true);
         if (computeFamily != presentFamily) {
-            uint32_t queueFamilyIndices[] = { computeFamily, presentFamily };
+            std::vector<uint32_t> queueFamilyIndices{ computeFamily, presentFamily };
             createInfo.setImageSharingMode(vk::SharingMode::eConcurrent);
-            // TODO: use setQueueFamilyIndices()
-            createInfo.setQueueFamilyIndexCount(2);
-            createInfo.setPQueueFamilyIndices(queueFamilyIndices);
+            createInfo.setQueueFamilyIndices(queueFamilyIndices);
         }
         swapChain = device->createSwapchainKHRUnique(createInfo);
         swapChainImages = device->getSwapchainImagesKHR(*swapChain);
@@ -536,8 +513,7 @@ private:
         // Set image layout
         storageImage.imageLayout = vk::ImageLayout::eGeneral;
         vk::UniqueCommandBuffer cmdBuf = createCommandBuffer();
-        transitionImageLayout(*cmdBuf, *storageImage.image,
-                              vk::ImageLayout::eUndefined, storageImage.imageLayout);
+        transitionImageLayout(*cmdBuf, *storageImage.image, vk::ImageLayout::eUndefined, storageImage.imageLayout);
         submitCommandBuffer(*cmdBuf);
     }
 
@@ -552,12 +528,10 @@ private:
     void submitCommandBuffer(vk::CommandBuffer& cmdBuf)
     {
         cmdBuf.end();
-
         vk::UniqueFence fence = device->createFenceUnique({});
         vk::SubmitInfo submitInfo;
         submitInfo.setCommandBuffers(cmdBuf);
         computeQueue.submit(submitInfo, *fence);
-
         vk::Result res = device->waitForFences(*fence, true, UINT64_MAX);
         assert(res == vk::Result::eSuccess);
     }
@@ -578,7 +552,7 @@ private:
     void loadShaders()
     {
         shaderModule = createShaderModule("shaders/compute.comp.spv");
-        shaderStage = { {}, vk::ShaderStageFlagBits::eCompute, *shaderModule, "main" };
+        shaderStage = { {}, vkSS::eCompute, *shaderModule, "main" };
     }
 
     vk::UniqueShaderModule createShaderModule(const std::string& filename)
@@ -590,7 +564,6 @@ private:
     void createComputePipeLine()
     {
         std::vector<vk::DescriptorSetLayoutBinding> bindings;
-        using vkSS = vk::ShaderStageFlagBits;
         bindings.push_back({ 0, vkDT::eStorageImage, 1, vkSS::eCompute });
         bindings.push_back({ 1, vkDT::eUniformBuffer, 1, vkSS::eCompute });
 
@@ -635,8 +608,7 @@ private:
         device->updateDescriptorSets(writeDescSets, nullptr);
     }
 
-    vk::WriteDescriptorSet createImageWrite(vk::DescriptorImageInfo imageInfo, vk::DescriptorType type,
-                                            uint32_t binding)
+    vk::WriteDescriptorSet createImageWrite(vk::DescriptorImageInfo imageInfo, vk::DescriptorType type, uint32_t binding)
     {
         vk::WriteDescriptorSet imageWrite{};
         imageWrite.setDstSet(*descSet);
@@ -647,8 +619,7 @@ private:
         return imageWrite;
     }
 
-    vk::WriteDescriptorSet createBufferWrite(vk::DescriptorBufferInfo bufferInfo, vk::DescriptorType type,
-                                             uint32_t binding)
+    vk::WriteDescriptorSet createBufferWrite(vk::DescriptorBufferInfo bufferInfo, vk::DescriptorType type, uint32_t binding)
     {
         vk::WriteDescriptorSet bufferWrite{};
         bufferWrite.setDstSet(*descSet);
@@ -665,8 +636,7 @@ private:
         for (int32_t i = 0; i < computeCommandBuffers.size(); ++i) {
             computeCommandBuffers[i]->begin(vk::CommandBufferBeginInfo{});
             computeCommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eCompute, *pipeline);
-            computeCommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eCompute,
-                                                         *pipelineLayout, 0, *descSet, nullptr);
+            computeCommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eCompute, *pipelineLayout, 0, *descSet, nullptr);
             computeCommandBuffers[i]->dispatch(WIDTH / 16, HEIGHT / 16, 1);
             copyStorageImage(*computeCommandBuffers[i], swapChainImages[i]);
             computeCommandBuffers[i]->end();
@@ -683,8 +653,7 @@ private:
         copyRegion.setSrcSubresource({ vk::ImageAspectFlagBits::eColor, 0, 0, 1 });
         copyRegion.setDstSubresource({ vk::ImageAspectFlagBits::eColor, 0, 0, 1 });
         copyRegion.setExtent({ storageImage.extent.width, storageImage.extent.height, 1 });
-        cmdBuf.copyImage(*storageImage.image, vkIL::eTransferSrcOptimal,
-                         swapChainImage, vkIL::eTransferDstOptimal, copyRegion);
+        cmdBuf.copyImage(*storageImage.image, vkIL::eTransferSrcOptimal, swapChainImage, vkIL::eTransferDstOptimal, copyRegion);
 
         transitionImageLayout(cmdBuf, *storageImage.image, vkIL::eTransferSrcOptimal, vkIL::eGeneral);
         transitionImageLayout(cmdBuf, swapChainImage, vkIL::eTransferDstOptimal, vkIL::ePresentSrcKHR);
