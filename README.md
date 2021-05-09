@@ -1,6 +1,6 @@
 # Single File Vulkan Automaton
 
-Single file vulkan automaton using compute shader
+Single file vulkan automaton using a compute shader
 
 ![automaton](https://user-images.githubusercontent.com/30839669/117557228-c1aa6d00-b0ab-11eb-8157-13387cc87a8c.png)
 
