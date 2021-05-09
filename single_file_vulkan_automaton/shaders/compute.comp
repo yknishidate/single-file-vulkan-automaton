@@ -1,10 +1,56 @@
 #version 460
 
 layout(local_size_x = 16, local_size_y = 16) in;
-layout(binding = 0, set = 0, rgba8) uniform image2D outputImage;
+layout(binding = 0, set = 0, rgba8) uniform image2D inputImage;
+layout(binding = 1, set = 0, rgba8) uniform image2D outputImage;
+layout(binding = 2, set = 0) uniform UniformData{ int frame; } uniformData;
+
+float random (vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+}
 
 void main()
 {
-    vec4 color = vec4(gl_GlobalInvocationID.x / 1024.0, gl_GlobalInvocationID.y / 1024.0, 1.0, 1.0);
-	imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), color);
+    vec4 aliveColor = vec4(1, 0, 0, 1);
+
+    // Initialize
+    if(uniformData.frame == 1){
+        bool isStartPoint = random(vec2(gl_WorkGroupID.xy)) > 0.7;
+        vec4 color = isStartPoint ? aliveColor : vec4(1);
+        imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), color);
+        return;
+    }
+
+    // Fetch neighbors
+    int count = 0;
+    bool isAlive = false;
+    for(int h = -1; h <= 1; h++){
+        for(int w = -1; w <= 1; w++){
+            ivec2 id = ivec2(gl_GlobalInvocationID.x + 16 * w,
+                             gl_GlobalInvocationID.y + 16 * h);
+            vec4 inputColor = imageLoad(inputImage, id);
+            if(inputColor == aliveColor){
+                if(h == 0 && w == 0){
+                    isAlive = true;
+                    continue;
+                }
+                count++;
+            }
+        }
+    }
+
+    // State transition
+    if(isAlive){
+        if(count <= 1 || count >= 4){
+            isAlive = false;
+        }
+    }else{
+        if(count == 3){
+            isAlive = true;
+        }
+    }
+
+    // Output
+    vec4 outputColor = isAlive ? aliveColor : vec4(1);
+	imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), outputColor);
 }

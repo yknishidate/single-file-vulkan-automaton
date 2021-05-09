@@ -296,7 +296,8 @@ private:
     vk::Extent2D extent;
     std::vector<vk::Image> swapChainImages;
 
-    Image storageImage;
+    Image inputImage;
+    Image outputImage;
 
     vk::UniqueShaderModule shaderModule;
     vk::PipelineShaderStageCreateInfo shaderStage;
@@ -345,7 +346,8 @@ private:
         std::cout << "created device\n";
         createSwapChain();
         std::cout << "created swap chain\n";
-        createStorageImage();
+        inputImage = createStorageImage();
+        outputImage = createStorageImage();
         std::cout << "created storage image\n";
         createUniformBuffer();
         std::cout << "created uniform buffer\n";
@@ -503,18 +505,20 @@ private:
         swapChainImages = device->getSwapchainImagesKHR(*swapChain);
     }
 
-    void createStorageImage()
+    Image createStorageImage()
     {
         // TODO: support computeFamily != presentFamily
-        storageImage.create(*device, extent, format, vkIU::eStorage | vkIU::eTransferSrc);
-        storageImage.bindMemory(physicalDevice);
-        storageImage.createImageView();
+        Image image;
+        image.create(*device, extent, format, vkIU::eStorage | vkIU::eTransferSrc | vkIU::eTransferDst);
+        image.bindMemory(physicalDevice);
+        image.createImageView();
 
         // Set image layout
-        storageImage.imageLayout = vk::ImageLayout::eGeneral;
+        image.imageLayout = vk::ImageLayout::eGeneral;
         vk::UniqueCommandBuffer cmdBuf = createCommandBuffer();
-        transitionImageLayout(*cmdBuf, *storageImage.image, vk::ImageLayout::eUndefined, storageImage.imageLayout);
+        transitionImageLayout(*cmdBuf, *image.image, vk::ImageLayout::eUndefined, image.imageLayout);
         submitCommandBuffer(*cmdBuf);
+        return std::move(image);
     }
 
     vk::UniqueCommandBuffer createCommandBuffer()
@@ -565,7 +569,8 @@ private:
     {
         std::vector<vk::DescriptorSetLayoutBinding> bindings;
         bindings.push_back({ 0, vkDT::eStorageImage, 1, vkSS::eCompute });
-        bindings.push_back({ 1, vkDT::eUniformBuffer, 1, vkSS::eCompute });
+        bindings.push_back({ 1, vkDT::eStorageImage, 1, vkSS::eCompute });
+        bindings.push_back({ 2, vkDT::eUniformBuffer, 1, vkSS::eCompute });
 
         descSetLayout = device->createDescriptorSetLayoutUnique({ {}, bindings });
         pipelineLayout = device->createPipelineLayoutUnique({ {}, *descSetLayout });
@@ -591,7 +596,7 @@ private:
 
     void createDescPool()
     {
-        std::vector<vk::DescriptorPoolSize> poolSizes{ {vkDT::eStorageImage, 1}, {vkDT::eUniformBuffer, 1} };
+        std::vector<vk::DescriptorPoolSize> poolSizes{ {vkDT::eStorageImage, 2}, {vkDT::eUniformBuffer, 1} };
 
         descPool = device->createDescriptorPoolUnique(
             vk::DescriptorPoolCreateInfo{}
@@ -603,8 +608,9 @@ private:
     void updateDescSet()
     {
         std::vector<vk::WriteDescriptorSet> writeDescSets;
-        writeDescSets.push_back(createImageWrite(storageImage.createDescInfo(), vkDT::eStorageImage, 0));
-        writeDescSets.push_back(createBufferWrite(uniformBuffer.createDescInfo(), vkDT::eUniformBuffer, 1));
+        writeDescSets.push_back(createImageWrite(inputImage.createDescInfo(), vkDT::eStorageImage, 0));
+        writeDescSets.push_back(createImageWrite(outputImage.createDescInfo(), vkDT::eStorageImage, 1));
+        writeDescSets.push_back(createBufferWrite(uniformBuffer.createDescInfo(), vkDT::eUniformBuffer, 2));
         device->updateDescriptorSets(writeDescSets, nullptr);
     }
 
@@ -638,25 +644,26 @@ private:
             computeCommandBuffers[i]->bindPipeline(vk::PipelineBindPoint::eCompute, *pipeline);
             computeCommandBuffers[i]->bindDescriptorSets(vk::PipelineBindPoint::eCompute, *pipelineLayout, 0, *descSet, nullptr);
             computeCommandBuffers[i]->dispatch(WIDTH / 16, HEIGHT / 16, 1);
-            copyStorageImage(*computeCommandBuffers[i], swapChainImages[i]);
+            copyImage(*computeCommandBuffers[i], *outputImage.image, *inputImage.image, vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral);
+            copyImage(*computeCommandBuffers[i], *outputImage.image, swapChainImages[i], vk::ImageLayout::eGeneral, vk::ImageLayout::ePresentSrcKHR);
             computeCommandBuffers[i]->end();
         }
     }
 
-    void copyStorageImage(vk::CommandBuffer& cmdBuf, vk::Image& swapChainImage)
+    void copyImage(vk::CommandBuffer& cmdBuf, vk::Image& src, vk::Image& dst, vk::ImageLayout srcLayout, vk::ImageLayout dstLayout)
     {
         using vkIL = vk::ImageLayout;
-        transitionImageLayout(cmdBuf, *storageImage.image, vkIL::eGeneral, vkIL::eTransferSrcOptimal);
-        transitionImageLayout(cmdBuf, swapChainImage, vkIL::eUndefined, vkIL::eTransferDstOptimal);
+        transitionImageLayout(cmdBuf, src, vkIL::eUndefined, vkIL::eTransferSrcOptimal);
+        transitionImageLayout(cmdBuf, dst, vkIL::eUndefined, vkIL::eTransferDstOptimal);
 
         vk::ImageCopy copyRegion{};
         copyRegion.setSrcSubresource({ vk::ImageAspectFlagBits::eColor, 0, 0, 1 });
         copyRegion.setDstSubresource({ vk::ImageAspectFlagBits::eColor, 0, 0, 1 });
-        copyRegion.setExtent({ storageImage.extent.width, storageImage.extent.height, 1 });
-        cmdBuf.copyImage(*storageImage.image, vkIL::eTransferSrcOptimal, swapChainImage, vkIL::eTransferDstOptimal, copyRegion);
+        copyRegion.setExtent({ WIDTH, HEIGHT, 1 });
+        cmdBuf.copyImage(src, vkIL::eTransferSrcOptimal, dst, vkIL::eTransferDstOptimal, copyRegion);
 
-        transitionImageLayout(cmdBuf, *storageImage.image, vkIL::eTransferSrcOptimal, vkIL::eGeneral);
-        transitionImageLayout(cmdBuf, swapChainImage, vkIL::eTransferDstOptimal, vkIL::ePresentSrcKHR);
+        transitionImageLayout(cmdBuf, src, vkIL::eTransferSrcOptimal, srcLayout);
+        transitionImageLayout(cmdBuf, dst, vkIL::eTransferDstOptimal, dstLayout);
     }
 
     void allocateDrawCommandBuffers()
