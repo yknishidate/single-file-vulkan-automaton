@@ -23,11 +23,11 @@ constexpr int WIDTH = 1024;
 constexpr int HEIGHT = 1024;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 std::vector<const char*> validationLayers;
-//#ifdef _DEBUG
+#ifdef _DEBUG
 constexpr bool enableValidationLayers = true;
-//#else
-//constexpr bool enableValidationLayers = false;
-//#endif
+#else
+constexpr bool enableValidationLayers = false;
+#endif
 
 // ----------------------------------------------------------------------------------------------------------
 // Functuins
