@@ -23,11 +23,11 @@ constexpr int WIDTH = 1024;
 constexpr int HEIGHT = 1024;
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 std::vector<const char*> validationLayers;
-#ifdef _DEBUG
+//#ifdef _DEBUG
 constexpr bool enableValidationLayers = true;
-#else
-constexpr bool enableValidationLayers = false;
-#endif
+//#else
+//constexpr bool enableValidationLayers = false;
+//#endif
 
 // ----------------------------------------------------------------------------------------------------------
 // Functuins
@@ -608,9 +608,15 @@ private:
     void updateDescSet()
     {
         std::vector<vk::WriteDescriptorSet> writeDescSets;
-        writeDescSets.push_back(createImageWrite(inputImage.createDescInfo(), vkDT::eStorageImage, 0));
-        writeDescSets.push_back(createImageWrite(outputImage.createDescInfo(), vkDT::eStorageImage, 1));
-        writeDescSets.push_back(createBufferWrite(uniformBuffer.createDescInfo(), vkDT::eUniformBuffer, 2));
+        vk::DescriptorImageInfo inputImageInfo = inputImage.createDescInfo();
+        vk::DescriptorImageInfo outputImageInfo = outputImage.createDescInfo();
+        vk::DescriptorBufferInfo uniformBufferInfo = uniformBuffer.createDescInfo();
+        vk::WriteDescriptorSet inputImageWrite = createImageWrite(inputImageInfo, vkDT::eStorageImage, 0);
+        vk::WriteDescriptorSet outputImageWrite = createImageWrite(outputImageInfo, vkDT::eStorageImage, 1);
+        vk::WriteDescriptorSet uniformBufferWrite = createBufferWrite(uniformBufferInfo, vkDT::eUniformBuffer, 2);
+        writeDescSets.push_back(inputImageWrite);
+        writeDescSets.push_back(outputImageWrite);
+        writeDescSets.push_back(uniformBufferWrite);
         device->updateDescriptorSets(writeDescSets, nullptr);
     }
 
@@ -696,7 +702,7 @@ private:
         uint32_t imageIndex = acquireNextImageIndex();
 
         // Wait for fence
-        if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+        if (imagesInFlight[imageIndex]) {
             device->waitForFences(imagesInFlight[imageIndex], true, UINT64_MAX);
         }
         imagesInFlight[imageIndex] = inFlightFences[currentFrame];
